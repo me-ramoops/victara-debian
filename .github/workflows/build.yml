@@ -151,6 +151,40 @@ jobs:
           PY
           ls -la out/
 
+      - name: Pack ramdisk boot image
+        run: |
+          set -euxo pipefail
+          sudo tee rootfs/init > /dev/null <<'INIT'
+          #!/bin/sh
+          mount -t proc none /proc
+          mount -t sysfs none /sys
+          mount -t devtmpfs none /dev
+          echo "=== victara Debian ramdisk boot ==="
+          exec /sbin/init
+          INIT
+          sudo chmod +x rootfs/init
+          (cd rootfs && sudo find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../ramdisk-boot.cpio.gz)
+          sudo chown "$(id -u):$(id -g)" ramdisk-boot.cpio.gz
+          python3 - ramdisk-boot.cpio.gz kernel/arch/arm/boot/zImage victara-noids.dtb out/boot-ram.img 'console=ttyHSL0,115200,n8 rw' <<'PY'
+          import struct, hashlib, sys
+          _, ramdisk, kernel, dtb_path, out, cmd = sys.argv
+          kernel = open(kernel, 'rb').read() + open(dtb_path, 'rb').read()
+          ramdisk = open(ramdisk, 'rb').read()
+          page, base = 2048, 0x00000000
+          def pad(b):
+              return b + b'\0' * ((page - len(b) % page) % page)
+          hdr = bytearray(b'ANDROID!')
+          hdr += struct.pack('<10I', len(kernel), base + 0x8000, len(ramdisk), base + 0x1000000, 0, 0, base + 0x100, page, 0, 0)
+          hdr += b'\0' * 16
+          cmd = cmd.encode()
+          hdr += cmd + b'\0' * (512 - len(cmd))
+          hdr += hashlib.sha1(kernel + ramdisk).digest()[:20] + b'\0' * 12
+          hdr += b'\0' * 1024
+          open(out, 'wb').write(pad(bytes(hdr)) + pad(kernel) + pad(ramdisk))
+          print('wrote', out)
+          PY
+          ls -la out/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -158,6 +192,7 @@ jobs:
           path: |
             out/boot-noids.img
             out/boot-table.img
+            out/boot-ram.img
             victara-debian-rootfs.tar.gz
             kernel-release.txt
           if-no-files-found: error
