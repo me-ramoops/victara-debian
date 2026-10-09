@@ -90,6 +90,43 @@ jobs:
           printf '/dev/mmcblk1p2 / ext4 defaults 0 1\n' | sudo tee rootfs/etc/fstab
           sudo chroot rootfs sh -c "echo root:toor | chpasswd"
           sudo chroot rootfs systemctl enable ssh || true
+          printf 'PermitRootLogin yes\n' | sudo tee rootfs/etc/ssh/sshd_config.d/root.conf
+          sudo tee rootfs/usr/local/sbin/usb-gadget.sh > /dev/null <<'GADGET'
+          #!/bin/sh
+          G=/sys/kernel/config/usb_gadget/victara
+          if [ ! -e "$G" ]; then
+            mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409"
+            echo 0x22b8 > "$G/idVendor"
+            echo 0x2e82 > "$G/idProduct"
+            echo motorola > "$G/strings/0x409/manufacturer"
+            echo victara > "$G/strings/0x409/product"
+            echo 0014302157 > "$G/strings/0x409/serialnumber"
+            echo "02:00:29:25:2b:82" > "$G/functions/rndis.usb0/dev_addr"
+            echo "02:00:29:25:2b:83" > "$G/functions/rndis.usb0/host_addr"
+            ln -sf "$G/functions/rndis.usb0" "$G/configs/c.1/"
+            UDC=$(ls /sys/class/udc 2>/dev/null | head -n 1)
+            if [ -n "$UDC" ]; then echo "$UDC" > "$G/UDC"; fi
+          fi
+          ip addr add 192.168.42.2/24 dev usb0 2>/dev/null || true
+          ip link set usb0 up
+          GADGET
+          sudo chmod +x rootfs/usr/local/sbin/usb-gadget.sh
+          sudo tee rootfs/etc/systemd/system/usb-gadget.service > /dev/null <<'UNIT'
+          [Unit]
+          Description=RNDIS USB gadget for victara
+          RequiresMountsFor=/sys/kernel/config
+          After=sys-kernel-config.mount network-pre.target
+          Before=network.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/usb-gadget.sh
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sudo chroot rootfs systemctl enable usb-gadget || true
           sudo rm -f rootfs/usr/bin/qemu-arm-static
           sudo tar -czf victara-debian-rootfs.tar.gz -C rootfs .
           sudo chown "$(id -u):$(id -g)" victara-debian-rootfs.tar.gz
