@@ -200,7 +200,8 @@ jobs:
           exec /sbin/init
           INIT
           sudo chmod +x rootfs/init
-          (cd rootfs && sudo find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../ramdisk-boot.cpio.gz)
+          sudo sh -c 'cd rootfs && find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../ramdisk-boot.cpio.gz'
+          sudo chown "$(id -u):$(id -g)" ramdisk-boot.cpio.gz
           sudo chown "$(id -u):$(id -g)" ramdisk-boot.cpio.gz
           python3 - ramdisk-boot.cpio.gz kernel/arch/arm/boot/zImage victara-noids.dtb out/boot-ram.img 'console=ttyHSL0,115200,n8 rw' <<'PY'
           import struct, hashlib, sys
