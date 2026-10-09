@@ -32,7 +32,7 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 --branch "$KERNEL_REF" "$KERNEL_URL" kernel
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
-          scripts/kconfig/merge_config.sh -m kernel/.config kernel/arch/arm/configs/victara.config
+          kernel/scripts/kconfig/merge_config.sh -m kernel/.config kernel/arch/arm/configs/victara.config
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j"$(nproc)" zImage dtbs modules
           test -s kernel/arch/arm/boot/zImage
