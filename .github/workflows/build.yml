@@ -33,12 +33,11 @@ jobs:
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
           scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
           # Force Wi-Fi directly built into kernel (built-in =y) and no module compression
-          cat << 'CFG' >> .config
-CONFIG_CFG80211=y
-CONFIG_MAC80211=y
-CONFIG_WCN36XX=y
-CONFIG_MODULE_COMPRESS_NONE=y
-CFG
+          printf '%s\n' \
+            "CONFIG_CFG80211=y" \
+            "CONFIG_MAC80211=y" \
+            "CONFIG_WCN36XX=y" \
+            "CONFIG_MODULE_COMPRESS_NONE=y" >> .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
           # Verify merged configs made it into .config
           grep "CONFIG_WATCHDOG=y" .config
