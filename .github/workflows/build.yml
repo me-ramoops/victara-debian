@@ -85,10 +85,28 @@ jobs:
           /bin/busybox mount -t proc none /proc
           /bin/busybox mount -t sysfs none /sys
           /bin/busybox mount -t devtmpfs none /dev
+
+          # Setup USB RNDIS gadget immediately
+          /bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null || true
+          G=/sys/kernel/config/usb_gadget/victara
+          /bin/busybox mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
+          echo 0x22b8 > "$G/idVendor" 2>/dev/null || true
+          echo 0x2e82 > "$G/idProduct" 2>/dev/null || true
+          echo motorola > "$G/strings/0x409/manufacturer" 2>/dev/null || true
+          echo victara > "$G/strings/0x409/product" 2>/dev/null || true
+          echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
+          /bin/busybox ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
+          UDC=$(ls /sys/class/udc/ 2>/dev/null | head -n 1)
+          if [ -n "$UDC" ]; then echo "$UDC" > "$G/UDC" 2>/dev/null || true; fi
+          /bin/busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null || true
+          /bin/busybox ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
+          /bin/busybox telnetd -l /bin/sh 2>/dev/null || true
+
           echo "=== victara mainline kernel boot ==="
+          echo "USB gadget active on 172.16.42.1 / 192.168.42.2"
           # Wait up to 15 seconds for eMMC storage to initialize
           for i in $(/bin/busybox seq 1 15); do
-            for dev in /dev/mmcblk0p28 /dev/mmcblk0p25; do
+            for dev in /dev/mmcblk0p25 /dev/mmcblk0p28; do
               if [ -b "$dev" ]; then
                 echo "Trying root on $dev..."
                 if /bin/busybox mount -o rw "$dev" /newroot 2>/dev/null; then
@@ -105,7 +123,7 @@ jobs:
             done
             /bin/busybox sleep 1
           done
-          echo "No valid rootfs found, spawning emergency shell."
+          echo "No valid rootfs found, emergency shell with USB active."
           exec /bin/busybox sh
           INIT
           chmod +x irm/init
@@ -116,7 +134,7 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          CMDLINE='console=tty0 console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
+          CMDLINE='console=tty0 console=ttyHSL0,115200,n8 lk2nd.pass-simplefb=xrgb8888,autorefresh rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
           python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
