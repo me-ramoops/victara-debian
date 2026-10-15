@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -yqq
-          sudo apt-get install -yqq bc bison busybox-static cpio device-tree-compiler flex gcc-arm-linux-gnueabihf git gzip libssl-dev make python3 xz-utils zstd
+          sudo apt-get install -yqq bc bison busybox-static cpio device-tree-compiler dropbear-bin flex gcc-arm-linux-gnueabihf git gzip libssl-dev make python3 xz-utils zstd
 
       - name: Build kernel and DTBs
         run: |
@@ -83,13 +83,33 @@ jobs:
       - name: Build minimal fallback ramdisk
         run: |
           set -euxo pipefail
-          rm -rf irm && mkdir -p irm/bin irm/sbin irm/proc irm/sys irm/dev irm/newroot
-          # Download real armv7 static busybox from Alpine v3.20
-          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/busybox-static-1.36.1-r31.apk | tar -xzO bin/busybox.static > irm/bin/busybox
+          rm -rf irm
+          mkdir -p irm/bin irm/sbin irm/lib irm/usr/bin irm/usr/sbin irm/etc/dropbear irm/root irm/proc irm/sys irm/dev/pts irm/var/log irm/var/run
+
+          # 1. Download Alpine ARMv7 core packages (busybox, musl, zlib, dropbear)
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/busybox-static-1.36.1-r31.apk | tar -xz -C irm bin/busybox.static
+          mv irm/bin/busybox.static irm/bin/busybox
           chmod +x irm/bin/busybox
+
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/musl-1.2.5-r3.apk | tar -xz -C irm lib/
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/zlib-1.3.2-r0.apk | tar -xz -C irm lib/
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/dropbear-2024.85-r0.apk | tar -xz -C irm usr/sbin/dropbear usr/bin/dropbearkey
+          chmod +x irm/usr/sbin/dropbear irm/usr/bin/dropbearkey
+
+          # 2. Pre-generate Dropbear host keys
+          dropbearkey -t ed25519 -f irm/etc/dropbear/dropbear_ed25519_host_key
+          dropbearkey -t rsa -f irm/etc/dropbear/dropbear_rsa_host_key
+
+          # 3. Setup root user with blank password
+          echo "root:x:0:0:root:/root:/bin/sh" > irm/etc/passwd
+          echo "root:::0:99999:7:::" > irm/etc/shadow
+          echo "root:x:0:root" > irm/etc/group
+          chmod 700 irm/root
+
+          # 4. Write /init
           cat > irm/init <<'INIT'
           #!/bin/busybox sh
-          export PATH=/bin:/sbin
+          export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
           # Install busybox symlinks
           /bin/busybox --install -s /bin 2>/dev/null || true
@@ -98,10 +118,13 @@ jobs:
           mount -t proc none /proc
           mount -t sysfs none /sys
           mount -t devtmpfs none /dev
+          mkdir -p /dev/pts
+          mount -t devpts devpts /dev/pts
 
           echo ""
           echo "=========================================="
-          echo "   victara mainline kernel (Linux 6.16)   "
+          echo "   Alpine Linux ARMv7 (Linux 6.16)        "
+          echo "   Motorola Moto X 2014 (victara)         "
           echo "=========================================="
           echo ""
 
@@ -138,39 +161,34 @@ jobs:
               fi
               sleep 1
             done
+
+            # Iniciar Dropbear SSH (porta 22 e 2222, login root sem senha)
+            /usr/sbin/dropbear -R -B -E -p 22 -p 2222 2>/dev/null || /usr/sbin/dropbear -B -p 22 2>/dev/null || true
+            echo "SSH ativo na porta 22 (ssh root@172.16.42.1)"
+
+            # Iniciar Telnetd na porta 23
             telnetd -l /bin/sh 2>/dev/null || true
-            echo "Telnet aberto na porta 23: conecte com 'telnet 172.16.42.1'"
-            if [ -e /dev/ttyGS0 ]; then
-              /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1 &
-              echo "Console serial USB ativo em /dev/ttyGS0"
-            fi
+            echo "Telnet aberto na porta 23 (telnet 172.16.42.1)"
+
+            # Console serial USB persistente
+            while true; do
+              if [ -e /dev/ttyGS0 ]; then
+                /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
+              fi
+              sleep 1
+            done &
+            echo "Console serial USB ativo em /dev/ttyGS0"
           else
             echo "UDC nao encontrada apos 15s"
           fi
 
-          # Wait up to 15 seconds for eMMC storage to initialize
-          echo "Buscando particao rootfs..."
-          for i in $(seq 1 15); do
-            for dev in /dev/mmcblk0p25 /dev/mmcblk0p28; do
-              if [ -b "$dev" ]; then
-                echo "Tentando rootfs em $dev..."
-                if mount -o rw "$dev" /newroot 2>/dev/null; then
-                  if [ -x /newroot/sbin/init ] || [ -f /newroot/bin/busybox ]; then
-                    echo "Rootfs montado em $dev, chaveando root..."
-                    mount --move /proc /newroot/proc
-                    mount --move /sys /newroot/sys
-                    mount --move /dev /newroot/dev
-                    exec switch_root /newroot /sbin/init
-                  fi
-                  umount /newroot 2>/dev/null || true
-                fi
-              fi
-            done
-            sleep 1
-          done
+          echo ""
+          echo "=== Sistema pronto e aguardando conexoes ==="
+          echo "SSH: ssh -o StrictHostKeyChecking=no root@172.16.42.1"
+          echo "Telnet: telnet 172.16.42.1"
+          echo "Serial: picocom -b 115200 /dev/ttyACM0"
+          echo ""
 
-          echo "Nenhum rootfs no eMMC. Shell de emergencia ativo."
-          echo "Conecte via USB: telnet 172.16.42.1"
           while true; do
             /bin/sh
             sleep 1
