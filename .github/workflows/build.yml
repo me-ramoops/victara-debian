@@ -29,13 +29,19 @@ jobs:
         run: |
           set -euxo pipefail
           git clone --depth=1 --branch "$KERNEL_REF" "$KERNEL_URL" kernel
-          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
-          kernel/scripts/kconfig/merge_config.sh -m kernel/.config kernel/arch/arm/configs/victara.config
-          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
-          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j"$(nproc)" zImage dtbs modules
-          test -s kernel/arch/arm/boot/zImage
-          test -s kernel/arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
-          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -s kernelrelease | tee kernel-release.txt
+          cd kernel
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
+          scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
+          # Verify merged configs made it into .config
+          grep "CONFIG_WATCHDOG=y" .config
+          grep "CONFIG_QCOM_WDT=y" .config
+          grep "CONFIG_FB_SIMPLE=y" .config
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j"$(nproc)" zImage dtbs modules
+          test -s arch/arm/boot/zImage
+          test -s arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -s kernelrelease | tee ../kernel-release.txt
+          cd ..
 
       - name: Build no-ids DTB variant and appended zImage-dtb
         run: |
@@ -124,7 +130,10 @@ jobs:
             /bin/busybox sleep 1
           done
           echo "No valid rootfs found, emergency shell with USB active."
-          exec /bin/busybox sh
+          while true; do
+            /bin/busybox sh
+            /bin/busybox sleep 1
+          done
           INIT
           chmod +x irm/init
           (cd irm && find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../initramfs.cpio.gz)
@@ -134,7 +143,7 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          CMDLINE='console=tty0 console=ttyHSL0,115200,n8 lk2nd.pass-simplefb=xrgb8888,autorefresh rootwait rw'
+          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 lk2nd.pass-simplefb=xrgb8888,autorefresh rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
           python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
@@ -156,9 +165,9 @@ jobs:
           PY
 
           # 2. boot-table.img (QCDT table boot image for stock Motorola bootloader)
-          python3 - out/msm8974pro-motorola-victara.dtb out/boot-table.img <<'PY'
+          python3 - out/msm8974pro-motorola-victara.dtb out/boot-table.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
-          _, dtb_path, out = sys.argv
+          _, dtb_path, out, cmd_str = sys.argv
           dtb = open(dtb_path, 'rb').read()
           assert dtb[:4] == b'\xd0\x0d\xfe\xed'
           page = 2048
@@ -181,7 +190,7 @@ jobs:
           hdr = bytearray(b'ANDROID!')
           hdr += struct.pack('<10I', len(kernel), base + 0x8000, len(ramdisk), base + 0x1000000, 0, 0, base + 0x100, page, len(dt), 0)
           hdr += b'\0' * 16
-          cmd = b'console=tty0 console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
+          cmd = cmd_str.encode()
           hdr += cmd + b'\0' * (512 - len(cmd))
           hdr += hashlib.sha1(kernel + ramdisk).digest()[:20] + b'\0' * 12
           hdr += b'\0' * 1024
