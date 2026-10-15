@@ -32,12 +32,22 @@ jobs:
           cd kernel
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
           scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
+          # Force Wi-Fi directly built into kernel (built-in =y) and no module compression
+          cat << 'CFG' >> .config
+CONFIG_CFG80211=y
+CONFIG_MAC80211=y
+CONFIG_WCN36XX=y
+CONFIG_MODULE_COMPRESS_NONE=y
+CFG
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
           # Verify merged configs made it into .config
           grep "CONFIG_WATCHDOG=y" .config
           grep "CONFIG_QCOM_WDT=y" .config
           grep "CONFIG_DRM_SIMPLEDRM=y" .config
           grep "CONFIG_DRM_MSM=m" .config
+          grep "CONFIG_WCN36XX=y" .config
+          grep "CONFIG_CFG80211=y" .config
+          grep "CONFIG_MAC80211=y" .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j"$(nproc)" zImage dtbs modules
           test -s arch/arm/boot/zImage
           test -s arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
@@ -100,13 +110,25 @@ jobs:
           dropbearkey -t ed25519 -f irm/etc/dropbear/dropbear_ed25519_host_key
           dropbearkey -t rsa -f irm/etc/dropbear/dropbear_rsa_host_key
 
-          # 3. Setup root user with blank password
+          # 3. Install WiFi firmware into /lib/firmware
+          mkdir -p irm/lib/firmware/wlan/prima
+          cp -r firmware/* irm/lib/firmware/
+          cp -r firmware/* irm/lib/firmware/wlan/prima/
+
+          # 4. Install Wi-Fi userspace tools (iw, wpa_supplicant, libnl3, libcrypto3, libssl3)
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libnl3-3.9.0-r1.apk | tar -xz -C irm usr/lib/libnl-3.so* usr/lib/libnl-genl-3.so* 2>/dev/null || true
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/openssl-3.3.2-r0.apk | tar -xz -C irm usr/lib/libcrypto.so* usr/lib/libssl.so* 2>/dev/null || true
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/iw-6.9-r0.apk | tar -xz -C irm usr/sbin/iw 2>/dev/null || true
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/wpa_supplicant-2.10-r8.apk | tar -xz -C irm usr/sbin/wpa_supplicant usr/sbin/wpa_cli usr/sbin/wpa_passphrase 2>/dev/null || true
+          chmod +x irm/usr/sbin/iw irm/usr/sbin/wpa* 2>/dev/null || true
+
+          # 5. Setup root user with blank password
           echo "root:x:0:0:root:/root:/bin/sh" > irm/etc/passwd
           echo "root:::0:99999:7:::" > irm/etc/shadow
           echo "root:x:0:root" > irm/etc/group
           chmod 700 irm/root
 
-          # 4. Write /init
+          # 6. Write /init
           cat > irm/init <<'INIT'
           #!/bin/busybox sh
           export PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -181,6 +203,18 @@ jobs:
           else
             echo "UDC nao encontrada apos 15s"
           fi
+
+          # Subir wlan0 em background assim que o hardware responder
+          (
+            for i in $(seq 1 30); do
+              if [ -d /sys/class/net/wlan0 ]; then
+                ip link set wlan0 up 2>/dev/null || true
+                echo "WiFi wlan0 detectado e pronto para conexao!"
+                break
+              fi
+              sleep 1
+            done
+          ) &
 
           echo ""
           echo "=== Sistema pronto e aguardando conexoes ==="
