@@ -77,26 +77,34 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf irm && mkdir -p irm/bin irm/proc irm/sys irm/dev irm/newroot
-          cp /bin/busybox irm/bin/busybox
+          # Download real armv7 static busybox
+          curl -fsSL --retry 3 https://busybox.net/downloads/binaries/1.35.0-armv7l/busybox -o irm/bin/busybox
+          chmod +x irm/bin/busybox
           cat > irm/init <<'INIT'
           #!/bin/busybox sh
           /bin/busybox mount -t proc none /proc
           /bin/busybox mount -t sysfs none /sys
           /bin/busybox mount -t devtmpfs none /dev
           echo "=== victara mainline kernel boot ==="
-          # Search for rootfs partition on eMMC
-          for dev in /dev/mmcblk0p28 /dev/mmcblk0p27 /dev/mmcblk0p26 /dev/mmcblk0p25; do
-            if [ -b "$dev" ]; then
-              echo "Trying root on $dev..."
-              /bin/busybox mount -o rw "$dev" /newroot 2>/dev/null && break
-            fi
+          # Wait up to 15 seconds for eMMC storage to initialize
+          for i in $(/bin/busybox seq 1 15); do
+            for dev in /dev/mmcblk0p28 /dev/mmcblk0p25; do
+              if [ -b "$dev" ]; then
+                echo "Trying root on $dev..."
+                if /bin/busybox mount -o rw "$dev" /newroot 2>/dev/null; then
+                  if [ -x /newroot/sbin/init ] || [ -f /newroot/bin/busybox ]; then
+                    echo "Rootfs mounted successfully from $dev, switching root..."
+                    /bin/busybox mount --move /proc /newroot/proc
+                    /bin/busybox mount --move /sys /newroot/sys
+                    /bin/busybox mount --move /dev /newroot/dev
+                    exec /bin/busybox switch_root /newroot /sbin/init
+                  fi
+                  /bin/busybox umount /newroot 2>/dev/null || true
+                fi
+              fi
+            done
+            /bin/busybox sleep 1
           done
-          if [ -d /newroot/sbin ] || [ -d /newroot/bin ]; then
-            /bin/busybox mount --move /proc /newroot/proc
-            /bin/busybox mount --move /sys /newroot/sys
-            /bin/busybox mount --move /dev /newroot/dev
-            exec /bin/busybox switch_root /newroot /sbin/init
-          fi
           echo "No valid rootfs found, spawning emergency shell."
           exec /bin/busybox sh
           INIT
@@ -108,8 +116,9 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
+          CMDLINE='console=tty0 console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
-          python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img 'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw' <<'PY'
+          python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
           _, ramdisk, kernel, out, cmd = sys.argv
           kernel = open(kernel, 'rb').read()
@@ -154,7 +163,7 @@ jobs:
           hdr = bytearray(b'ANDROID!')
           hdr += struct.pack('<10I', len(kernel), base + 0x8000, len(ramdisk), base + 0x1000000, 0, 0, base + 0x100, page, len(dt), 0)
           hdr += b'\0' * 16
-          cmd = b'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
+          cmd = b'console=tty0 console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
           hdr += cmd + b'\0' * (512 - len(cmd))
           hdr += hashlib.sha1(kernel + ramdisk).digest()[:20] + b'\0' * 12
           hdr += b'\0' * 1024
@@ -163,7 +172,7 @@ jobs:
           PY
 
           # 3. boot-victara.img (Standard appended DTB boot image)
-          python3 - initramfs.cpio out/zImage-dtb out/boot-victara.img 'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw' <<'PY'
+          python3 - initramfs.cpio out/zImage-dtb out/boot-victara.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
           _, ramdisk, kernel, out, cmd = sys.argv
           kernel = open(kernel, 'rb').read()
