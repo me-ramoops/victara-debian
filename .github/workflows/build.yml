@@ -32,18 +32,21 @@ jobs:
           cd kernel
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
           scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
-          # Force Wi-Fi directly built into kernel (built-in =y) and no module compression
+          # Force Display/GPU (MSM DRM KMS), Touch (Atmel mXT), and Wi-Fi directly built into kernel (=y)
           printf '%s\n' \
             "CONFIG_CFG80211=y" \
             "CONFIG_MAC80211=y" \
             "CONFIG_WCN36XX=y" \
+            "CONFIG_DRM_MSM=y" \
+            "CONFIG_DRM_PANEL_SAMSUNG_S6E3FA2_FULL=y" \
+            "CONFIG_TOUCHSCREEN_ATMEL_MXT=y" \
             "CONFIG_MODULE_COMPRESS_NONE=y" >> .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
           # Verify merged configs made it into .config
           grep "CONFIG_WATCHDOG=y" .config
           grep "CONFIG_QCOM_WDT=y" .config
-          grep "CONFIG_DRM_SIMPLEDRM=y" .config
-          grep "CONFIG_DRM_MSM=m" .config
+          grep "CONFIG_DRM_MSM=y" .config
+          grep "CONFIG_TOUCHSCREEN_ATMEL_MXT=y" .config
           grep "CONFIG_WCN36XX=y" .config
           grep "CONFIG_CFG80211=y" .config
           grep "CONFIG_MAC80211=y" .config
