@@ -37,6 +37,7 @@ jobs:
           grep "CONFIG_WATCHDOG=y" .config
           grep "CONFIG_QCOM_WDT=y" .config
           grep "CONFIG_DRM_SIMPLEDRM=y" .config
+          grep "CONFIG_DRM_MSM=m" .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j"$(nproc)" zImage dtbs modules
           test -s arch/arm/boot/zImage
           test -s arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
@@ -82,57 +83,92 @@ jobs:
       - name: Build minimal fallback ramdisk
         run: |
           set -euxo pipefail
-          rm -rf irm && mkdir -p irm/bin irm/proc irm/sys irm/dev irm/newroot
+          rm -rf irm && mkdir -p irm/bin irm/sbin irm/proc irm/sys irm/dev irm/newroot
           # Download real armv7 static busybox from Alpine v3.20
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/busybox-static-1.36.1-r31.apk | tar -xzO bin/busybox.static > irm/bin/busybox
           chmod +x irm/bin/busybox
           cat > irm/init <<'INIT'
           #!/bin/busybox sh
-          /bin/busybox mount -t proc none /proc
-          /bin/busybox mount -t sysfs none /sys
-          /bin/busybox mount -t devtmpfs none /dev
+          export PATH=/bin:/sbin
 
-          # Setup USB RNDIS gadget immediately
-          /bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null || true
+          # Install busybox symlinks
+          /bin/busybox --install -s /bin 2>/dev/null || true
+
+          # Mount essential filesystems
+          mount -t proc none /proc
+          mount -t sysfs none /sys
+          mount -t devtmpfs none /dev
+
+          echo ""
+          echo "=========================================="
+          echo "   victara mainline kernel (Linux 6.16)   "
+          echo "=========================================="
+          echo ""
+
+          # Setup USB RNDIS gadget via ConfigFS
+          mount -t configfs none /sys/kernel/config 2>/dev/null || true
           G=/sys/kernel/config/usb_gadget/victara
-          /bin/busybox mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
+          mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
           echo 0x22b8 > "$G/idVendor" 2>/dev/null || true
           echo 0x2e82 > "$G/idProduct" 2>/dev/null || true
           echo motorola > "$G/strings/0x409/manufacturer" 2>/dev/null || true
           echo victara > "$G/strings/0x409/product" 2>/dev/null || true
           echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
-          /bin/busybox ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
-          UDC=$(ls /sys/class/udc/ 2>/dev/null | head -n 1)
-          if [ -n "$UDC" ]; then echo "$UDC" > "$G/UDC" 2>/dev/null || true; fi
-          /bin/busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null || true
-          /bin/busybox ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
-          /bin/busybox telnetd -l /bin/sh 2>/dev/null || true
+          ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
 
-          echo "=== victara mainline kernel boot ==="
-          echo "USB gadget active on 172.16.42.1 / 192.168.42.2"
+          echo "Aguardando controladora USB (UDC)..."
+          UDC=""
+          for i in $(seq 1 15); do
+            UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n 1 || true)
+            if [ -n "$UDC" ]; then
+              echo "UDC detectada: $UDC"
+              echo "$UDC" > "$G/UDC" 2>/dev/null || true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -n "$UDC" ]; then
+            for i in $(seq 1 5); do
+              if ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null; then
+                ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
+                echo "USB gadget ativo em 172.16.42.1 / 192.168.42.2"
+                break
+              fi
+              sleep 1
+            done
+            telnetd -l /bin/sh 2>/dev/null || true
+            echo "Telnet aberto na porta 23: conecte com 'telnet 172.16.42.1'"
+          else
+            echo "UDC nao encontrada apos 15s"
+          fi
+
           # Wait up to 15 seconds for eMMC storage to initialize
-          for i in $(/bin/busybox seq 1 15); do
+          echo "Buscando particao rootfs..."
+          for i in $(seq 1 15); do
             for dev in /dev/mmcblk0p25 /dev/mmcblk0p28; do
               if [ -b "$dev" ]; then
-                echo "Trying root on $dev..."
-                if /bin/busybox mount -o rw "$dev" /newroot 2>/dev/null; then
+                echo "Tentando rootfs em $dev..."
+                if mount -o rw "$dev" /newroot 2>/dev/null; then
                   if [ -x /newroot/sbin/init ] || [ -f /newroot/bin/busybox ]; then
-                    echo "Rootfs mounted successfully from $dev, switching root..."
-                    /bin/busybox mount --move /proc /newroot/proc
-                    /bin/busybox mount --move /sys /newroot/sys
-                    /bin/busybox mount --move /dev /newroot/dev
-                    exec /bin/busybox switch_root /newroot /sbin/init
+                    echo "Rootfs montado em $dev, chaveando root..."
+                    mount --move /proc /newroot/proc
+                    mount --move /sys /newroot/sys
+                    mount --move /dev /newroot/dev
+                    exec switch_root /newroot /sbin/init
                   fi
-                  /bin/busybox umount /newroot 2>/dev/null || true
+                  umount /newroot 2>/dev/null || true
                 fi
               fi
             done
-            /bin/busybox sleep 1
+            sleep 1
           done
-          echo "No valid rootfs found, emergency shell with USB active."
+
+          echo "Nenhum rootfs no eMMC. Shell de emergencia ativo."
+          echo "Conecte via USB: telnet 172.16.42.1"
           while true; do
-            /bin/busybox sh
-            /bin/busybox sleep 1
+            /bin/sh
+            sleep 1
           done
           INIT
           chmod +x irm/init
