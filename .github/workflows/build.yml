@@ -77,8 +77,8 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf irm && mkdir -p irm/bin irm/proc irm/sys irm/dev irm/newroot
-          # Download real armv7 static busybox
-          curl -fsSL --retry 3 https://busybox.net/downloads/binaries/1.35.0-armv7l/busybox -o irm/bin/busybox
+          # Download real armv7 static busybox from Alpine v3.20
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/busybox-static-1.36.1-r31.apk | tar -xzO bin/busybox.static > irm/bin/busybox
           chmod +x irm/bin/busybox
           cat > irm/init <<'INIT'
           #!/bin/busybox sh
