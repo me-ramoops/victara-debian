@@ -121,7 +121,7 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libnl3-3.9.0-r1.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libcrypto3-3.3.7-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libssl3-3.3.7-r0.apk | tar -xz -C irm
-          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/dbus-libs-1.14.10-r2.apk | tar -xz -C irm
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/dbus-libs-1.14.10-r1.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/iw-6.9-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/wpa_supplicant-2.10-r11.apk | tar -xz -C irm
           # Mirror all /usr/lib to /lib just in case
