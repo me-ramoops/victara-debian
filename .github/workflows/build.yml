@@ -1,4 +1,4 @@
-name: Build victara Debian
+name: Build victara Mainline Kernel
 
 on:
   push:
@@ -9,15 +9,13 @@ permissions:
   contents: read
 
 env:
-  KERNEL_URL: https://github.com/ramoops094/linux-msm8974.git
-  KERNEL_REF: victara
-  DEB_SUITE: bookworm
-  DEB_ARCH: armhf
+  KERNEL_URL: https://gitlab.com/vanadium-oss/motorola-msm8974/mainline/linux-msm8974.git
+  KERNEL_REF: qcom-msm8974-6.16.y
 
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -yqq
-          sudo apt-get install -yqq bc bison busybox-static cpio debootstrap device-tree-compiler flex gcc-arm-linux-gnueabihf git gzip libssl-dev make python3 qemu-user-static xz-utils zstd
+          sudo apt-get install -yqq bc bison busybox-static cpio device-tree-compiler flex gcc-arm-linux-gnueabihf git gzip libssl-dev make python3 xz-utils zstd
 
       - name: Build kernel and DTBs
         run: |
@@ -39,15 +37,43 @@ jobs:
           test -s kernel/arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
           make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -s kernelrelease | tee kernel-release.txt
 
-      - name: Build no-ids DTB variant
+      - name: Build no-ids DTB variant and appended zImage-dtb
         run: |
           set -euxo pipefail
-          dtc -I dtb -O dts -o victara.dts kernel/arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb
-          sed -i '/qcom,msm-id =/d' victara.dts
-          dtc -I dts -O dtb -o victara-noids.dtb victara.dts
-          python3 -c "b=open('victara-noids.dtb','rb').read(); assert b[:4]==b'\xd0\x0d\xfe\xed' and b'msm-id' not in b"
+          mkdir -p out
+          KREL="$(cat kernel-release.txt)"
+          cp kernel/arch/arm/boot/zImage out/zImage
+          cp kernel/arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb out/msm8974pro-motorola-victara.dtb
+          cp kernel/.config "out/kernel.config-$KREL"
+          cp kernel/.config out/kernel.config
+          cp kernel/System.map out/System.map
+          cp kernel-release.txt out/
 
-      - name: Build initramfs
+          # Build variant without qcom,msm-id for permissive bootloaders
+          dtc -I dtb -O dts -o victara.dts out/msm8974pro-motorola-victara.dtb
+          sed -i '/qcom,msm-id =/d' victara.dts
+          dtc -I dts -O dtb -o out/victara-noids.dtb victara.dts
+          python3 -c "b=open('out/victara-noids.dtb','rb').read(); assert b[:4]==b'\xd0\x0d\xfe\xed' and b'msm-id' not in b"
+
+          # Appended DTB zImage
+          cat out/zImage out/msm8974pro-motorola-victara.dtb > out/zImage-dtb
+          cat out/zImage out/victara-noids.dtb > out/zImage-dtb-noids
+
+      - name: Export kernel modules and firmware
+        run: |
+          set -euxo pipefail
+          KREL="$(cat kernel-release.txt)"
+          rm -rf modules-root
+          mkdir -p modules-root
+          make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="$PWD/modules-root" INSTALL_MOD_STRIP=1 modules_install
+          tar -I 'zstd -T0 -10' -cf "out/kernel-modules-$KREL.tar.zst" -C modules-root lib/modules
+          tar -czf "out/kernel-modules-$KREL.tar.gz" -C modules-root lib/modules
+          rm -rf modules-root
+
+          # Package WiFi firmware
+          tar -czf out/victara-firmware-wcnss.tar.gz -C firmware .
+
+      - name: Build minimal fallback ramdisk
         run: |
           set -euxo pipefail
           rm -rf irm && mkdir -p irm/bin irm/proc irm/sys irm/dev irm/newroot
@@ -57,89 +83,36 @@ jobs:
           /bin/busybox mount -t proc none /proc
           /bin/busybox mount -t sysfs none /sys
           /bin/busybox mount -t devtmpfs none /dev
-          echo "=== victara Debian, mounting root ==="
-          for i in $(/bin/busybox seq 1 30); do
-            if [ -e /dev/mmcblk1p2 ]; then break; fi
-            /bin/busybox sleep 1
+          echo "=== victara mainline kernel boot ==="
+          # Search for rootfs partition on eMMC
+          for dev in /dev/mmcblk0p28 /dev/mmcblk0p27 /dev/mmcblk0p26 /dev/mmcblk0p25; do
+            if [ -b "$dev" ]; then
+              echo "Trying root on $dev..."
+              /bin/busybox mount -o rw "$dev" /newroot 2>/dev/null && break
+            fi
           done
-          /bin/busybox mount -o rw /dev/mmcblk1p2 /newroot || { echo "ROOT NOT FOUND"; exec /bin/busybox sh; }
-          /bin/busybox mount --move /proc /newroot/proc
-          /bin/busybox mount --move /sys /newroot/sys
-          /bin/busybox mount --move /dev /newroot/dev
-          exec /bin/busybox switch_root /newroot /sbin/init
+          if [ -d /newroot/sbin ] || [ -d /newroot/bin ]; then
+            /bin/busybox mount --move /proc /newroot/proc
+            /bin/busybox mount --move /sys /newroot/sys
+            /bin/busybox mount --move /dev /newroot/dev
+            exec /bin/busybox switch_root /newroot /sbin/init
+          fi
+          echo "No valid rootfs found, spawning emergency shell."
+          exec /bin/busybox sh
           INIT
           chmod +x irm/init
-          (cd irm && find . -print0 | cpio --quiet -o -H newc --null > ../initramfs.cpio)
+          (cd irm && find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../initramfs.cpio.gz)
+          gzip -d -c initramfs.cpio.gz > initramfs.cpio
           test -s initramfs.cpio
 
-      - name: Build Debian rootfs
+      - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          sudo rm -rf rootfs
-          sudo debootstrap --arch="$DEB_ARCH" --foreign --include=openssh-server,wpasupplicant,wireless-tools "$DEB_SUITE" rootfs
-          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
-          sudo chroot rootfs /debootstrap/debootstrap --second-stage
-          KREL="$(cat kernel-release.txt)"
-          sudo make -C kernel ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="$GITHUB_WORKSPACE/rootfs" INSTALL_MOD_STRIP=1 modules_install
-          sudo chroot rootfs depmod -a "$KREL"
-          sudo mkdir -p rootfs/lib/firmware/wlan/prima
-          sudo cp firmware/wcnss.* rootfs/lib/firmware/
-          sudo cp firmware/WCNSS_qcom_wlan_nv.bin firmware/WCNSS_qcom_cfg.ini rootfs/lib/firmware/wlan/prima/
-          echo victara | sudo tee rootfs/etc/hostname
-          printf '127.0.0.1 localhost\n127.0.1.1 victara\n' | sudo tee rootfs/etc/hosts
-          printf '/dev/mmcblk1p2 / ext4 defaults 0 1\n' | sudo tee rootfs/etc/fstab
-          sudo chroot rootfs sh -c "echo root:toor | chpasswd"
-          sudo chroot rootfs systemctl enable ssh || true
-          printf 'PermitRootLogin yes\n' | sudo tee rootfs/etc/ssh/sshd_config.d/root.conf
-          sudo tee rootfs/usr/local/sbin/usb-gadget.sh > /dev/null <<'GADGET'
-          #!/bin/sh
-          G=/sys/kernel/config/usb_gadget/victara
-          if [ ! -e "$G" ]; then
-            mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409"
-            echo 0x22b8 > "$G/idVendor"
-            echo 0x2e82 > "$G/idProduct"
-            echo motorola > "$G/strings/0x409/manufacturer"
-            echo victara > "$G/strings/0x409/product"
-            echo 0014302157 > "$G/strings/0x409/serialnumber"
-            echo "02:00:29:25:2b:82" > "$G/functions/rndis.usb0/dev_addr"
-            echo "02:00:29:25:2b:83" > "$G/functions/rndis.usb0/host_addr"
-            ln -sf "$G/functions/rndis.usb0" "$G/configs/c.1/"
-            UDC=$(ls /sys/class/udc 2>/dev/null | head -n 1)
-            if [ -n "$UDC" ]; then echo "$UDC" > "$G/UDC"; fi
-          fi
-          ip addr add 192.168.42.2/24 dev usb0 2>/dev/null || true
-          ip link set usb0 up
-          GADGET
-          sudo chmod +x rootfs/usr/local/sbin/usb-gadget.sh
-          sudo tee rootfs/etc/systemd/system/usb-gadget.service > /dev/null <<'UNIT'
-          [Unit]
-          Description=RNDIS USB gadget for victara
-          RequiresMountsFor=/sys/kernel/config
-          After=sys-kernel-config.mount network-pre.target
-          Before=network.target
-
-          [Service]
-          Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/usr/local/sbin/usb-gadget.sh
-
-          [Install]
-          WantedBy=multi-user.target
-          UNIT
-          sudo chroot rootfs systemctl enable usb-gadget || true
-          sudo rm -f rootfs/usr/bin/qemu-arm-static
-          sudo tar -czf victara-debian-rootfs.tar.gz -C rootfs .
-          sudo chown "$(id -u):$(id -g)" victara-debian-rootfs.tar.gz
-          test -s victara-debian-rootfs.tar.gz
-
-      - name: Pack boot images
-        run: |
-          set -euxo pipefail
-          mkdir -p out
-          python3 - initramfs.cpio kernel/arch/arm/boot/zImage victara-noids.dtb out/boot-noids.img 'console=ttyHSL0,115200,n8 root=/dev/mmcblk1p2 rootwait rw' <<'PY'
+          # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
+          python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img 'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw' <<'PY'
           import struct, hashlib, sys
-          _, ramdisk, kernel, dtb_path, out, cmd = sys.argv
-          kernel = open(kernel, 'rb').read() + open(dtb_path, 'rb').read()
+          _, ramdisk, kernel, out, cmd = sys.argv
+          kernel = open(kernel, 'rb').read()
           ramdisk = open(ramdisk, 'rb').read()
           page, base = 2048, 0x00000000
           def pad(b):
@@ -154,7 +127,9 @@ jobs:
           open(out, 'wb').write(pad(bytes(hdr)) + pad(kernel) + pad(ramdisk))
           print('wrote', out)
           PY
-          python3 - kernel/arch/arm/boot/dts/qcom/msm8974pro-motorola-victara.dtb out/boot-table.img <<'PY'
+
+          # 2. boot-table.img (QCDT table boot image for stock Motorola bootloader)
+          python3 - out/msm8974pro-motorola-victara.dtb out/boot-table.img <<'PY'
           import struct, hashlib, sys
           _, dtb_path, out = sys.argv
           dtb = open(dtb_path, 'rb').read()
@@ -173,40 +148,25 @@ jobs:
           dt = table + tbl
           dt += b'\0' * (((len(dt) + page - 1) // page) * page - len(dt))
           dt += blob
-          kernel = open('kernel/arch/arm/boot/zImage', 'rb').read()
+          kernel = open('out/zImage', 'rb').read()
           ramdisk = open('initramfs.cpio', 'rb').read()
           base = 0x00000000
           hdr = bytearray(b'ANDROID!')
           hdr += struct.pack('<10I', len(kernel), base + 0x8000, len(ramdisk), base + 0x1000000, 0, 0, base + 0x100, page, len(dt), 0)
           hdr += b'\0' * 16
-          cmd = b'console=ttyHSL0,115200,n8 root=/dev/mmcblk1p2 rootwait rw'
+          cmd = b'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw'
           hdr += cmd + b'\0' * (512 - len(cmd))
           hdr += hashlib.sha1(kernel + ramdisk).digest()[:20] + b'\0' * 12
           hdr += b'\0' * 1024
           open(out, 'wb').write(pad(bytes(hdr)) + pad(kernel) + pad(ramdisk) + pad(dt))
           print('wrote', out, len(dt))
           PY
-          ls -la out/
 
-      - name: Pack ramdisk boot image
-        run: |
-          set -euxo pipefail
-          sudo tee rootfs/init > /dev/null <<'INIT'
-          #!/bin/sh
-          mount -t proc none /proc
-          mount -t sysfs none /sys
-          mount -t devtmpfs none /dev
-          echo "=== victara Debian ramdisk boot ==="
-          exec /sbin/init
-          INIT
-          sudo chmod +x rootfs/init
-          sudo sh -c 'cd rootfs && find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../ramdisk-boot.cpio.gz'
-          sudo chown "$(id -u):$(id -g)" ramdisk-boot.cpio.gz
-          sudo chown "$(id -u):$(id -g)" ramdisk-boot.cpio.gz
-          python3 - ramdisk-boot.cpio.gz kernel/arch/arm/boot/zImage victara-noids.dtb out/boot-ram.img 'console=ttyHSL0,115200,n8 rw' <<'PY'
+          # 3. boot-victara.img (Standard appended DTB boot image)
+          python3 - initramfs.cpio out/zImage-dtb out/boot-victara.img 'console=ttyHSL0,115200,n8 root=/dev/mmcblk0p28 rootwait rw' <<'PY'
           import struct, hashlib, sys
-          _, ramdisk, kernel, dtb_path, out, cmd = sys.argv
-          kernel = open(kernel, 'rb').read() + open(dtb_path, 'rb').read()
+          _, ramdisk, kernel, out, cmd = sys.argv
+          kernel = open(kernel, 'rb').read()
           ramdisk = open(ramdisk, 'rb').read()
           page, base = 2048, 0x00000000
           def pad(b):
@@ -221,16 +181,28 @@ jobs:
           open(out, 'wb').write(pad(bytes(hdr)) + pad(kernel) + pad(ramdisk))
           print('wrote', out)
           PY
+
           ls -la out/
+          sha256sum out/* | tee out/SHA256SUMS
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: victara-debian
+          name: victara-mainline-kernel
           path: |
+            out/boot-victara.img
             out/boot-noids.img
             out/boot-table.img
-            out/boot-ram.img
-            victara-debian-rootfs.tar.gz
-            kernel-release.txt
+            out/zImage
+            out/zImage-dtb
+            out/zImage-dtb-noids
+            out/msm8974pro-motorola-victara.dtb
+            out/victara-noids.dtb
+            out/kernel-modules-*.tar.zst
+            out/kernel-modules-*.tar.gz
+            out/victara-firmware-wcnss.tar.gz
+            out/kernel-release.txt
+            out/kernel.config*
+            out/System.map
+            out/SHA256SUMS
           if-no-files-found: error
