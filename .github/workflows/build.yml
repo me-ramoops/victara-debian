@@ -105,16 +105,17 @@ jobs:
           echo "=========================================="
           echo ""
 
-          # Setup USB RNDIS gadget via ConfigFS
+          # Setup USB RNDIS & CDC ACM gadget via ConfigFS
           mount -t configfs none /sys/kernel/config 2>/dev/null || true
           G=/sys/kernel/config/usb_gadget/victara
-          mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
+          mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/functions/acm.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
           echo 0x22b8 > "$G/idVendor" 2>/dev/null || true
           echo 0x2e82 > "$G/idProduct" 2>/dev/null || true
           echo motorola > "$G/strings/0x409/manufacturer" 2>/dev/null || true
           echo victara > "$G/strings/0x409/product" 2>/dev/null || true
           echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
           ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
+          ln -sfn "$G/functions/acm.usb0" "$G/configs/c.1/" 2>/dev/null || true
 
           echo "Aguardando controladora USB (UDC)..."
           UDC=""
@@ -139,6 +140,10 @@ jobs:
             done
             telnetd -l /bin/sh 2>/dev/null || true
             echo "Telnet aberto na porta 23: conecte com 'telnet 172.16.42.1'"
+            if [ -e /dev/ttyGS0 ]; then
+              /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1 &
+              echo "Console serial USB ativo em /dev/ttyGS0"
+            fi
           else
             echo "UDC nao encontrada apos 15s"
           fi
@@ -179,7 +184,7 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 lk2nd.pass-simplefb=xrgb8888,autorefresh rootwait rw'
+          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 lk2nd.pass-simplefb=xrgb8888,autorefresh clk_ignore_unused pd_ignore_unused rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
           python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
