@@ -30,28 +30,14 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 --branch "$KERNEL_REF" "$KERNEL_URL" kernel
           cd kernel
-
-          # Patch Samsung S6E3FA2 panel driver to fallback to PANEL_S6E3FA2 instead of skipping init
-          sed -i 's/ctx->subtype = PANEL_UNKNOWN;/ctx->subtype = PANEL_S6E3FA2; ctx->seq_data = \&seqdata_s6e3fa2;/g' drivers/gpu/drm/panel/panel-samsung-s6e3fa2-full.c || true
-          sed -i 's/goto read_id_fail;/ctx->subtype = PANEL_S6E3FA2; ctx->seq_data = \&seqdata_s6e3fa2; return 0;/g' drivers/gpu/drm/panel/panel-samsung-s6e3fa2-full.c || true
-
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
           scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
-          # Force Display/GPU (MSM DRM KMS), Touch (Atmel mXT), Wi-Fi, and Battery Fuel Gauge directly built into kernel (=y)
-          printf '%s\n' \
-            "CONFIG_CFG80211=y" \
-            "CONFIG_MAC80211=y" \
-            "CONFIG_WCN36XX=y" \
-            "CONFIG_DRM_MSM=y" \
-            "CONFIG_DRM_PANEL_SAMSUNG_S6E3FA2_FULL=y" \
-            "CONFIG_TOUCHSCREEN_ATMEL_MXT=y" \
-            "CONFIG_BATTERY_MAX17042=y" \
-            "CONFIG_MODULE_COMPRESS_NONE=y" >> .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
           # Verify merged configs made it into .config
           grep "CONFIG_WATCHDOG=y" .config
           grep "CONFIG_QCOM_WDT=y" .config
           grep "CONFIG_DRM_MSM=y" .config
+          grep "CONFIG_DRM_PANEL_SAMSUNG_S6E3FA2_FULL=y" .config
           grep "CONFIG_TOUCHSCREEN_ATMEL_MXT=y" .config
           grep "CONFIG_BATTERY_MAX17042=y" .config
           grep "CONFIG_WCN36XX=y" .config
