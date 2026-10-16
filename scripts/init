@@ -1,0 +1,112 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+
+# Install busybox symlinks
+/bin/busybox --install -s /bin 2>/dev/null || true
+
+# Mount essential filesystems
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /dev/shm
+
+# Disable display & console blanking (AMOLED screen stays awake)
+echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null || true
+echo -ne "\033[9;0]" > /dev/tty0 2>/dev/null || true
+echo -ne "\033[14;0]" > /dev/tty0 2>/dev/null || true
+
+echo ""
+echo "=========================================="
+echo "   Alpine Linux ARMv7 (Linux 6.16)        "
+echo "   Motorola Moto X 2014 (victara)         "
+echo "=========================================="
+echo ""
+
+# Setup USB RNDIS & CDC ACM gadget via ConfigFS
+mount -t configfs none /sys/kernel/config 2>/dev/null || true
+G=/sys/kernel/config/usb_gadget/victara
+mkdir -p "$G/strings/0x409" "$G/functions/rndis.usb0" "$G/functions/acm.usb0" "$G/configs/c.1/strings/0x409" 2>/dev/null || true
+echo 0x22b8 > "$G/idVendor" 2>/dev/null || true
+echo 0x2e82 > "$G/idProduct" 2>/dev/null || true
+echo motorola > "$G/strings/0x409/manufacturer" 2>/dev/null || true
+echo victara > "$G/strings/0x409/product" 2>/dev/null || true
+echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
+ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
+ln -sfn "$G/functions/acm.usb0" "$G/configs/c.1/" 2>/dev/null || true
+
+echo "Aguardando controladora USB (UDC)..."
+UDC=""
+for i in $(seq 1 15); do
+  UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n 1 || true)
+  if [ -n "$UDC" ]; then
+    echo "UDC detectada: $UDC"
+    echo "$UDC" > "$G/UDC" 2>/dev/null || true
+    break
+  fi
+  sleep 1
+done
+
+if [ -n "$UDC" ]; then
+  for i in $(seq 1 5); do
+    if ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null; then
+      ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
+      echo "USB gadget ativo em 172.16.42.1 / 192.168.42.2"
+      break
+    fi
+    sleep 1
+  done
+
+  # Iniciar Dropbear SSH (porta 22 e 2222, login root sem senha)
+  /usr/sbin/dropbear -R -B -E -p 22 -p 2222 2>/dev/null || /usr/sbin/dropbear -B -p 22 2>/dev/null || true
+  echo "SSH ativo na porta 22 (ssh root@172.16.42.1)"
+
+  # Iniciar Telnetd na porta 23
+  telnetd -l /bin/sh 2>/dev/null || true
+  echo "Telnet aberto na porta 23 (telnet 172.16.42.1)"
+
+  # Console serial USB persistente
+  while true; do
+    if [ -e /dev/ttyGS0 ]; then
+      /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
+    fi
+    sleep 1
+  done &
+  echo "Console serial USB ativo em /dev/ttyGS0"
+else
+  echo "UDC nao encontrada apos 15s"
+fi
+
+# Subir wlan0 em background assim que o hardware responder
+(
+  for i in $(seq 1 30); do
+    if [ -d /sys/class/net/wlan0 ]; then
+      ip link set wlan0 up 2>/dev/null || true
+      echo "WiFi wlan0 detectado e pronto para conexao!"
+      if [ -s /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+        wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+        udhcpc -i wlan0 -b 2>/dev/null || true
+      fi
+      break
+    fi
+    sleep 1
+  done
+) &
+
+echo ""
+echo "=== Sistema pronto e aguardando conexoes ==="
+echo "SSH:       ssh -o StrictHostKeyChecking=no root@172.16.42.1"
+echo "Telnet:    telnet 172.16.42.1"
+echo "Serial:    picocom -b 115200 /dev/ttyACM0"
+echo "Wi-Fi:     wifi-connect <SSID> <SENHA>"
+echo "Escanear:  wifi-scan"
+echo "Bateria:   battery"
+echo "Pacotes:   apk update && apk add <pacote>"
+echo "Instalar:  install-to-emmc"
+echo ""
+
+while true; do
+  /bin/sh
+  sleep 1
+done

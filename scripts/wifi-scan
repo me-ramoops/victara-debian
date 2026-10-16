@@ -1,0 +1,4 @@
+#!/bin/sh
+ip link set wlan0 up 2>/dev/null || true
+echo "[*] Escaneando redes Wi-Fi..."
+iw dev wlan0 scan 2>/dev/null | grep -E 'SSID:|signal:|freq:' | sed 's/^[ \t]*//'

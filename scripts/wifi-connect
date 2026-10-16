@@ -1,0 +1,59 @@
+#!/bin/sh
+SSID="$1"
+PASS="$2"
+
+if [ -z "$SSID" ] || [ -z "$PASS" ]; then
+  echo "Uso: wifi-connect <SSID> <SENHA>"
+  echo "Exemplo: wifi-connect 'VIVOFIBRA-WIFI6-D688' 'minhasenha'"
+  exit 1
+fi
+
+echo "[*] Preparando interface wlan0..."
+ip link set wlan0 up 2>/dev/null || true
+
+echo "[*] Gerando configuracao Wi-Fi (PMF desativado para compatibilidade com routers Wi-Fi 6)..."
+mkdir -p /etc/wpa_supplicant /var/run/wpa_supplicant
+cat > /etc/wpa_supplicant/wpa_supplicant.conf <<CONF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+
+network={
+    ssid="$SSID"
+    psk="$PASS"
+    key_mgmt=WPA-PSK
+    proto=RSN
+    pairwise=CCMP
+    group=CCMP
+    ieee80211w=0
+}
+CONF
+chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
+
+echo "[*] Reiniciando wpa_supplicant..."
+killall wpa_supplicant 2>/dev/null || true
+sleep 1
+wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
+
+echo "[*] Aguardando conexao com $SSID..."
+CONNECTED=0
+for i in $(seq 1 15); do
+  if iw dev wlan0 link 2>/dev/null | grep -q "Connected to"; then
+    CONNECTED=1
+    echo "[+] Conectado ao AP!"
+    break
+  fi
+  sleep 1
+done
+
+if [ "$CONNECTED" -eq 0 ]; then
+  echo "[-] Timeout na associacao. Verifique a senha ou execute: wpa_cli -i wlan0 status"
+  exit 1
+fi
+
+echo "[*] Solicitando IP via DHCP (udhcpc)..."
+killall udhcpc 2>/dev/null || true
+udhcpc -i wlan0 -n -q -t 5
+
+echo ""
+echo "=== Status da Conexao ==="
+ip addr show wlan0 | grep "inet " || echo "[-] Falha ao obter IP."

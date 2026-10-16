@@ -1,0 +1,19 @@
+#!/bin/sh
+echo "=== Status de Bateria & Energia (MAX17048) ==="
+FOUND=0
+for f in /sys/class/power_supply/*; do
+  [ -d "$f" ] || continue
+  FOUND=1
+  dev=$(basename "$f")
+  type=$(cat "$f/type" 2>/dev/null || echo "Unknown")
+  cap=$(cat "$f/capacity" 2>/dev/null || echo "N/A")
+  stat=$(cat "$f/status" 2>/dev/null || echo "N/A")
+  volt=$(cat "$f/voltage_now" 2>/dev/null || echo "N/A")
+  curr=$(cat "$f/current_now" 2>/dev/null || echo "N/A")
+  echo "Dispositivo: $dev ($type)"
+  [ "$cap" != "N/A" ] && echo "  Carga: ${cap}%"
+  [ "$stat" != "N/A" ] && echo "  Status: $stat"
+  [ "$volt" != "N/A" ] && echo "  Tensao: $((volt / 1000)) mV"
+  [ "$curr" != "N/A" ] && echo "  Corrente: $((curr / 1000)) mA"
+done
+[ "$FOUND" -eq 0 ] && echo "Nenhum dispositivo em /sys/class/power_supply/"
