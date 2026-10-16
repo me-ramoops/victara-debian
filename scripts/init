@@ -14,8 +14,15 @@ mount -t tmpfs tmpfs /dev/shm
 
 # Disable display & console blanking (AMOLED screen stays awake)
 echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null || true
-echo -ne "\033[9;0]" > /dev/tty0 2>/dev/null || true
-echo -ne "\033[14;0]" > /dev/tty0 2>/dev/null || true
+echo 0 > /sys/module/kernel/parameters/consoleblank 2>/dev/null || true
+echo -ne "\033[9;0]\033[14;0]" > /dev/tty0 2>/dev/null || true
+(
+  while true; do
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null || true
+    echo -ne "\033[9;0]\033[14;0]" > /dev/tty0 2>/dev/null || true
+    sleep 30
+  done
+) &
 
 echo ""
 echo "=========================================="

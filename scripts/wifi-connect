@@ -32,6 +32,7 @@ update_config=1
 network={
     ssid="$SSID"
     key_mgmt=NONE
+    auth_alg=OPEN
 }
 CONF
 else
@@ -81,6 +82,9 @@ fi
 
 echo "[*] Solicitando IP via DHCP (udhcpc)..."
 udhcpc -i wlan0 -n -q -t 5
+
+echo "[*] Sincronizando horario via NTP..."
+(ntpd -q -n -p pool.ntp.org 2>/dev/null || date -s "2026-10-16 12:00:00" 2>/dev/null) &
 
 echo ""
 echo "=== Status da Conexao ==="

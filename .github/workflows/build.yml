@@ -92,7 +92,6 @@ jobs:
 
           # 1. Unpack official Alpine ARMv7 Minirootfs
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armv7/alpine-minirootfs-3.20.10-armv7.tar.gz | tar -xz -C irm
-          chmod -R u+rwX irm
 
           # 2. Extract static apk-tools, WiFi, disk tools and remote access packages
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/apk-tools-static-2.14.4-r1.apk | tar -xz -C irm
@@ -105,7 +104,6 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/pcsc-lite-libs-2.2.3-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-1.47.0-r5.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-libs-1.47.0-r5.apk | tar -xz -C irm
-          chmod -R u+rwX irm
 
           # Unify shared libraries and create helper symlinks
           cp -aP irm/usr/lib/* irm/lib/ 2>/dev/null || true
@@ -146,9 +144,11 @@ jobs:
           printf 'victara\n' > irm/etc/hostname
 
           mkdir -p irm/etc/apk
-          printf '%s\n%s\n' \
+          printf '%s\n%s\n%s\n%s\n' \
             "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" \
-            "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" > irm/etc/apk/repositories
+            "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" \
+            "http://dl-cdn.alpinelinux.org/alpine/v3.20/main" \
+            "http://dl-cdn.alpinelinux.org/alpine/v3.20/community" > irm/etc/apk/repositories
 
           # 6. Install init and helper scripts
           cp scripts/init irm/init
@@ -157,7 +157,7 @@ jobs:
           cp scripts/battery irm/usr/bin/battery
           cp scripts/install-to-emmc irm/usr/bin/install-to-emmc
 
-          chmod +x irm/init irm/usr/bin/*
+          chmod +x irm/init irm/usr/bin/wifi-connect irm/usr/bin/wifi-scan irm/usr/bin/battery irm/usr/bin/install-to-emmc
           ln -sf /usr/bin/wifi-connect irm/bin/wifi-connect
           ln -sf /usr/bin/wifi-scan irm/bin/wifi-scan
           ln -sf /usr/bin/battery irm/bin/battery
