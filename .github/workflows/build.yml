@@ -30,6 +30,11 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 --branch "$KERNEL_REF" "$KERNEL_URL" kernel
           cd kernel
+
+          # Patch Samsung S6E3FA2 panel driver to fallback to PANEL_S6E3FA2 instead of skipping init
+          sed -i 's/ctx->subtype = PANEL_UNKNOWN;/ctx->subtype = PANEL_S6E3FA2; ctx->seq_data = \&seqdata_s6e3fa2;/g' drivers/gpu/drm/panel/panel-samsung-s6e3fa2-full.c || true
+          sed -i 's/goto read_id_fail;/ctx->subtype = PANEL_S6E3FA2; ctx->seq_data = \&seqdata_s6e3fa2; return 0;/g' drivers/gpu/drm/panel/panel-samsung-s6e3fa2-full.c || true
+
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- msm8974_defconfig
           scripts/kconfig/merge_config.sh -m .config arch/arm/configs/victara.config
           # Force Display/GPU (MSM DRM KMS), Touch (Atmel mXT), and Wi-Fi directly built into kernel (=y)
@@ -122,6 +127,7 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libcrypto3-3.3.7-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/libssl3-3.3.7-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/dbus-libs-1.14.10-r1.apk | tar -xz -C irm
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/pcsc-lite-libs-2.2.3-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/iw-6.9-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/wpa_supplicant-2.10-r11.apk | tar -xz -C irm
           # Mirror all /usr/lib to /lib just in case
@@ -133,6 +139,8 @@ jobs:
           echo "root:::0:99999:7:::" > irm/etc/shadow
           echo "root:x:0:root" > irm/etc/group
           chmod 700 irm/root
+          mkdir -p irm/tmp irm/var/run/wpa_supplicant
+          chmod 1777 irm/tmp
 
           # 6. Write /init
           cat > irm/init <<'INIT'
