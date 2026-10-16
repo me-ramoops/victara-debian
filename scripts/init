@@ -40,12 +40,19 @@ echo 0x2e82 > "$G/idProduct" 2>/dev/null || true
 echo motorola > "$G/strings/0x409/manufacturer" 2>/dev/null || true
 echo victara > "$G/strings/0x409/product" 2>/dev/null || true
 echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
+echo "RNDIS + Serial" > "$G/configs/c.1/strings/0x409/configuration" 2>/dev/null || true
+echo 500 > "$G/configs/c.1/MaxPower" 2>/dev/null || true
+
+# Set static valid MAC addresses on RNDIS endpoints
+echo "02:00:89:74:00:01" > "$G/functions/rndis.usb0/dev_addr" 2>/dev/null || true
+echo "02:00:89:74:00:02" > "$G/functions/rndis.usb0/host_addr" 2>/dev/null || true
+
 ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
 ln -sfn "$G/functions/acm.usb0" "$G/configs/c.1/" 2>/dev/null || true
 
 echo "Waiting for USB device controller (UDC)..."
 UDC=""
-for i in $(seq 1 15); do
+for i in $(seq 1 20); do
   UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n 1 || true)
   if [ -n "$UDC" ]; then
     echo "UDC detected: $UDC"
@@ -56,14 +63,25 @@ for i in $(seq 1 15); do
 done
 
 if [ -n "$UDC" ]; then
-  for i in $(seq 1 5); do
-    if ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null; then
-      ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
-      echo "USB gadget active on 172.16.42.1 / 192.168.42.2"
-      break
-    fi
+  # Find USB network interface name (usb0, rndis0 or eth0)
+  USB_IF=""
+  for i in $(seq 1 10); do
+    for name in usb0 rndis0 eth0; do
+      if [ -d "/sys/class/net/$name" ]; then
+        USB_IF="$name"
+        break 2
+      fi
+    done
     sleep 1
   done
+
+  if [ -n "$USB_IF" ]; then
+    ifconfig "$USB_IF" 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null || true
+    ifconfig "${USB_IF}:1" 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
+    echo "USB network ($USB_IF) active on 172.16.42.1 / 192.168.42.2"
+  else
+    echo "Warning: USB network interface not found in /sys/class/net/"
+  fi
 
   # Start Dropbear SSH (port 22 and 2222, root login without password)
   /usr/sbin/dropbear -R -B -E -p 22 -p 2222 2>/dev/null || /usr/sbin/dropbear -B -p 22 2>/dev/null || true
@@ -82,7 +100,7 @@ if [ -n "$UDC" ]; then
   done &
   echo "USB serial console active on /dev/ttyGS0"
 else
-  echo "UDC not found after 15s"
+  echo "UDC not found after 20s"
 fi
 
 # Bring up wlan0 in background once hardware initializes

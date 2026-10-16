@@ -94,6 +94,9 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armv7/alpine-minirootfs-3.20.10-armv7.tar.gz | tar -xz -C irm
 
           # 2. Extract static apk-tools, WiFi, disk tools and remote access packages
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/busybox-static-1.36.1-r31.apk | tar -xz -C irm bin/busybox.static
+          mv irm/bin/busybox.static irm/bin/busybox
+          chmod +x irm/bin/busybox
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/apk-tools-static-2.14.4-r1.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/dropbear-2024.85-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/wpa_supplicant-2.10-r11.apk | tar -xz -C irm
@@ -162,7 +165,7 @@ jobs:
           ln -sf /usr/bin/wifi-scan irm/bin/wifi-scan
           ln -sf /usr/bin/battery irm/bin/battery
           ln -sf /usr/bin/install-to-emmc irm/bin/install-to-emmc
-          (cd irm && find . -print0 | cpio --quiet -o -H newc --null | gzip -9 > ../initramfs.cpio.gz)
+          (cd irm && find . -print0 | cpio --quiet -o -H newc -R 0:0 --null | gzip -9 > ../initramfs.cpio.gz)
           gzip -d -c initramfs.cpio.gz > initramfs.cpio
           test -s initramfs.cpio
           cp initramfs.cpio.gz out/initramfs.cpio.gz
@@ -170,7 +173,7 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 consoleblank=0 lk2nd.pass-simplefb=xrgb8888,autorefresh clk_ignore_unused pd_ignore_unused msm.allow_vram_carveout=1 rootwait rw'
+          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 consoleblank=0 lk2nd.pass-simplefb=xrgb8888,autorefresh,relocate clk_ignore_unused pd_ignore_unused msm.allow_vram_carveout=1 rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
           python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
