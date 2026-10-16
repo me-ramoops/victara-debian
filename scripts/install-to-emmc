@@ -1,19 +1,19 @@
 #!/bin/sh
 set -e
 TARGET="/dev/mmcblk0p28"
-echo "=== Instalador Alpine Linux para eMMC ($TARGET) ==="
+echo "=== Alpine Linux eMMC Installer ($TARGET) ==="
 if [ ! -b "$TARGET" ]; then
-  echo "Erro: $TARGET nao encontrado!"
+  echo "Error: $TARGET not found!"
   exit 1
 fi
-echo "Formatando $TARGET como ext4..."
+echo "Formatting $TARGET as ext4..."
 mkfs.ext4 -F -L "userdata" "$TARGET"
 mkdir -p /mnt/target
 mount "$TARGET" /mnt/target
-echo "Copiando sistema de arquivos para o eMMC..."
+echo "Copying root filesystem to eMMC..."
 cp -a /bin /sbin /usr /lib /etc /root /var /mnt/target/
 mkdir -p /mnt/target/proc /mnt/target/sys /mnt/target/dev /mnt/target/tmp /mnt/target/mnt /mnt/target/run
 chmod 1777 /mnt/target/tmp
 printf '%s / ext4 defaults,noatime 0 1\n' "$TARGET" > /mnt/target/etc/fstab
 umount /mnt/target
-echo "=== Instalacao concluida com sucesso! ==="
+echo "=== Installation completed successfully! ==="

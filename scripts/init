@@ -12,7 +12,7 @@ mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /dev/shm
 
-# Disable display & console blanking (AMOLED screen stays awake)
+# Disable display & console blanking (keep AMOLED screen awake)
 echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null || true
 echo 0 > /sys/module/kernel/parameters/consoleblank 2>/dev/null || true
 echo -ne "\033[9;0]\033[14;0]" > /dev/tty0 2>/dev/null || true
@@ -43,12 +43,12 @@ echo 0014302157 > "$G/strings/0x409/serialnumber" 2>/dev/null || true
 ln -sfn "$G/functions/rndis.usb0" "$G/configs/c.1/" 2>/dev/null || true
 ln -sfn "$G/functions/acm.usb0" "$G/configs/c.1/" 2>/dev/null || true
 
-echo "Aguardando controladora USB (UDC)..."
+echo "Waiting for USB device controller (UDC)..."
 UDC=""
 for i in $(seq 1 15); do
   UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n 1 || true)
   if [ -n "$UDC" ]; then
-    echo "UDC detectada: $UDC"
+    echo "UDC detected: $UDC"
     echo "$UDC" > "$G/UDC" 2>/dev/null || true
     break
   fi
@@ -59,33 +59,33 @@ if [ -n "$UDC" ]; then
   for i in $(seq 1 5); do
     if ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null; then
       ifconfig usb0:1 192.168.42.2 netmask 255.255.255.0 up 2>/dev/null || true
-      echo "USB gadget ativo em 172.16.42.1 / 192.168.42.2"
+      echo "USB gadget active on 172.16.42.1 / 192.168.42.2"
       break
     fi
     sleep 1
   done
 
-  # Iniciar Dropbear SSH (porta 22 e 2222, login root sem senha)
+  # Start Dropbear SSH (port 22 and 2222, root login without password)
   /usr/sbin/dropbear -R -B -E -p 22 -p 2222 2>/dev/null || /usr/sbin/dropbear -B -p 22 2>/dev/null || true
-  echo "SSH ativo na porta 22 (ssh root@172.16.42.1)"
+  echo "SSH server active on port 22 (ssh root@172.16.42.1)"
 
-  # Iniciar Telnetd na porta 23
+  # Start Telnetd on port 23
   telnetd -l /bin/sh 2>/dev/null || true
-  echo "Telnet aberto na porta 23 (telnet 172.16.42.1)"
+  echo "Telnet server active on port 23 (telnet 172.16.42.1)"
 
-  # Console serial USB persistente
+  # Persistent USB serial console
   while true; do
     if [ -e /dev/ttyGS0 ]; then
       /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
     fi
     sleep 1
   done &
-  echo "Console serial USB ativo em /dev/ttyGS0"
+  echo "USB serial console active on /dev/ttyGS0"
 else
-  echo "UDC nao encontrada apos 15s"
+  echo "UDC not found after 15s"
 fi
 
-# Subir wlan0 em background assim que o hardware responder
+# Bring up wlan0 in background once hardware initializes
 (
   for i in $(seq 1 30); do
     if [ -d /sys/class/net/wlan0 ]; then
@@ -96,7 +96,7 @@ fi
         ip link set dev wlan0 address "$NEW_MAC" 2>/dev/null || true
       fi
       ip link set wlan0 up 2>/dev/null || true
-      echo "WiFi wlan0 detectado e pronto para conexao!"
+      echo "WiFi wlan0 detected and ready!"
       if [ -s /etc/wpa_supplicant/wpa_supplicant.conf ]; then
         wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
         udhcpc -i wlan0 -b 2>/dev/null || true
@@ -108,15 +108,15 @@ fi
 ) &
 
 echo ""
-echo "=== Sistema pronto e aguardando conexoes ==="
+echo "=== System Ready ==="
 echo "SSH:       ssh -o StrictHostKeyChecking=no root@172.16.42.1"
 echo "Telnet:    telnet 172.16.42.1"
 echo "Serial:    picocom -b 115200 /dev/ttyACM0"
-echo "Wi-Fi:     wifi-connect <SSID> <SENHA>"
-echo "Escanear:  wifi-scan"
-echo "Bateria:   battery"
-echo "Pacotes:   apk update && apk add <pacote>"
-echo "Instalar:  install-to-emmc"
+echo "WiFi:      wifi-connect <SSID> [PASSWORD]"
+echo "Scan:      wifi-scan"
+echo "Battery:   battery"
+echo "Packages:  apk update && apk add <pkg>"
+echo "Install:   install-to-emmc"
 echo ""
 
 while true; do
