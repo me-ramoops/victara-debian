@@ -107,15 +107,17 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/pcsc-lite-libs-2.2.3-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-1.47.0-r5.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-libs-1.47.0-r5.apk | tar -xz -C irm
+          curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/community/armv7/fastfetch-2.13.1-r0.apk | tar -xz -C irm usr/bin/fastfetch usr/share/fastfetch 2>/dev/null || true
 
           # Unify shared libraries and create helper symlinks
           cp -aP irm/usr/lib/* irm/lib/ 2>/dev/null || true
-          chmod +x irm/sbin/apk irm/sbin/apk.static irm/usr/sbin/dropbear* irm/usr/sbin/wpa* irm/usr/sbin/iw 2>/dev/null || true
+          chmod +x irm/sbin/apk irm/sbin/apk.static irm/usr/sbin/dropbear* irm/usr/sbin/wpa* irm/usr/sbin/iw irm/usr/bin/fastfetch 2>/dev/null || true
           ln -sf /sbin/apk irm/bin/apk
           ln -sf /sbin/apk.static irm/bin/apk.static
           ln -sf /usr/sbin/iw irm/bin/iw
           ln -sf /usr/sbin/wpa_supplicant irm/bin/wpa_supplicant
           ln -sf /usr/sbin/wpa_cli irm/bin/wpa_cli
+          ln -sf /usr/bin/fastfetch irm/bin/fastfetch
 
           # 3. Copy kernel modules and WiFi firmware
           if [ -d modules-root/lib/modules ]; then

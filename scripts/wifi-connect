@@ -11,15 +11,16 @@ if [ -z "$SSID" ]; then
 fi
 
 echo "[*] Checking WiFi hardware and MAC address..."
+FACTORY_MAC="e0:75:7d:c8:62:e5"
 MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || true)
-if [ -z "$MAC" ] || [ "$MAC" = "00:00:00:00:00:00" ]; then
-  NEW_MAC="e0:75:7d:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
-  echo "[*] Setting interface MAC address to: $NEW_MAC"
+if [ -z "$MAC" ] || [ "$MAC" = "00:00:00:00:00:00" ] || [ "$MAC" != "$FACTORY_MAC" ]; then
+  echo "[*] Ensuring interface MAC matches firmware NV: $FACTORY_MAC"
   ip link set dev wlan0 down 2>/dev/null || true
-  ip link set dev wlan0 address "$NEW_MAC" 2>/dev/null || true
+  ip link set dev wlan0 address "$FACTORY_MAC" 2>/dev/null || true
 fi
 
 ip link set wlan0 up 2>/dev/null || true
+iw dev wlan0 set power_save off 2>/dev/null || true
 
 mkdir -p /etc/wpa_supplicant /var/run/wpa_supplicant /var/log
 
@@ -32,11 +33,11 @@ update_config=1
 network={
     ssid="$SSID"
     key_mgmt=NONE
-    auth_alg=OPEN
+    scan_ssid=1
 }
 CONF
 else
-  echo "[*] Configuring secured network: $SSID (PMF disabled)"
+  echo "[*] Configuring secured network: $SSID"
   cat > /etc/wpa_supplicant/wpa_supplicant.conf <<CONF
 ctrl_interface=/var/run/wpa_supplicant
 update_config=1
@@ -44,11 +45,7 @@ update_config=1
 network={
     ssid="$SSID"
     psk="$PASS"
-    key_mgmt=WPA-PSK
-    proto=RSN WPA
-    pairwise=CCMP TKIP
-    group=CCMP TKIP
-    ieee80211w=0
+    scan_ssid=1
 }
 CONF
 fi
@@ -60,12 +57,12 @@ killall -9 wpa_supplicant udhcpc 2>/dev/null || true
 rm -rf /var/run/wpa_supplicant/* 2>/dev/null || true
 sleep 1
 
-wpa_supplicant -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /var/log/wpa_supplicant.log 2>&1 &
+wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /var/log/wpa_supplicant.log 2>&1
 
 echo "[*] Waiting for WiFi association (up to 20s)..."
 CONNECTED=0
 for i in $(seq 1 20); do
-  if iw dev wlan0 link 2>/dev/null | grep -q "Connected to"; then
+  if wpa_cli -i wlan0 status 2>/dev/null | grep -q "wpa_state=COMPLETED"; then
     CONNECTED=1
     echo "[+] Successfully connected to AP!"
     break
@@ -75,8 +72,8 @@ done
 
 if [ "$CONNECTED" -eq 0 ]; then
   echo "[-] Failed to associate with AP."
-  echo "[-] Recent wpa_supplicant events:"
-  tail -n 15 /var/log/wpa_supplicant.log 2>/dev/null || true
+  echo "[-] Current wpa_supplicant status:"
+  wpa_cli -i wlan0 status 2>/dev/null || true
   exit 1
 fi
 
