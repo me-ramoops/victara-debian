@@ -2,18 +2,41 @@
 SSID="$1"
 PASS="$2"
 
-if [ -z "$SSID" ] || [ -z "$PASS" ]; then
-  echo "Uso: wifi-connect <SSID> <SENHA>"
-  echo "Exemplo: wifi-connect 'VIVOFIBRA-WIFI6-D688' 'minhasenha'"
+if [ -z "$SSID" ]; then
+  echo "Uso: wifi-connect <SSID> [SENHA]"
+  echo "Exemplos:"
+  echo "  Rede com senha:  wifi-connect 'VIVOFIBRA-WIFI6-D688' 'minhasenha'"
+  echo "  Rede aberta:     wifi-connect 'RoteadorCelular'"
   exit 1
 fi
 
-echo "[*] Preparando interface wlan0..."
+echo "[*] Verificando hardware e endereco MAC..."
+MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || true)
+if [ -z "$MAC" ] || [ "$MAC" = "00:00:00:00:00:00" ]; then
+  NEW_MAC="e0:75:7d:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
+  echo "[*] Configurando MAC da interface para: $NEW_MAC"
+  ip link set dev wlan0 down 2>/dev/null || true
+  ip link set dev wlan0 address "$NEW_MAC" 2>/dev/null || true
+fi
+
 ip link set wlan0 up 2>/dev/null || true
 
-echo "[*] Gerando configuracao Wi-Fi (PMF desativado para compatibilidade com routers Wi-Fi 6)..."
-mkdir -p /etc/wpa_supplicant /var/run/wpa_supplicant
-cat > /etc/wpa_supplicant/wpa_supplicant.conf <<CONF
+mkdir -p /etc/wpa_supplicant /var/run/wpa_supplicant /var/log
+
+if [ -z "$PASS" ] || [ "$PASS" = "none" ] || [ "$PASS" = "NONE" ]; then
+  echo "[*] Configurando rede aberta (sem senha): $SSID"
+  cat > /etc/wpa_supplicant/wpa_supplicant.conf <<CONF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+
+network={
+    ssid="$SSID"
+    key_mgmt=NONE
+}
+CONF
+else
+  echo "[*] Configurando rede protegida: $SSID (PMF desativado)"
+  cat > /etc/wpa_supplicant/wpa_supplicant.conf <<CONF
 ctrl_interface=/var/run/wpa_supplicant
 update_config=1
 
@@ -21,37 +44,42 @@ network={
     ssid="$SSID"
     psk="$PASS"
     key_mgmt=WPA-PSK
-    proto=RSN
-    pairwise=CCMP
-    group=CCMP
+    proto=RSN WPA
+    pairwise=CCMP TKIP
+    group=CCMP TKIP
     ieee80211w=0
 }
 CONF
+fi
+
 chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
 
 echo "[*] Reiniciando wpa_supplicant..."
-killall wpa_supplicant 2>/dev/null || true
+killall -9 wpa_supplicant udhcpc 2>/dev/null || true
+rm -rf /var/run/wpa_supplicant/* 2>/dev/null || true
 sleep 1
-wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
 
-echo "[*] Aguardando conexao com $SSID..."
+wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf -f /var/log/wpa_supplicant.log
+
+echo "[*] Aguardando associacao Wi-Fi (ate 20s)..."
 CONNECTED=0
-for i in $(seq 1 15); do
+for i in $(seq 1 20); do
   if iw dev wlan0 link 2>/dev/null | grep -q "Connected to"; then
     CONNECTED=1
-    echo "[+] Conectado ao AP!"
+    echo "[+] Conectado com sucesso ao AP!"
     break
   fi
   sleep 1
 done
 
 if [ "$CONNECTED" -eq 0 ]; then
-  echo "[-] Timeout na associacao. Verifique a senha ou execute: wpa_cli -i wlan0 status"
+  echo "[-] Nao foi possivel associar ao AP."
+  echo "[-] Ultimos eventos do wpa_supplicant:"
+  tail -n 15 /var/log/wpa_supplicant.log 2>/dev/null || true
   exit 1
 fi
 
 echo "[*] Solicitando IP via DHCP (udhcpc)..."
-killall udhcpc 2>/dev/null || true
 udhcpc -i wlan0 -n -q -t 5
 
 echo ""

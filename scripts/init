@@ -82,6 +82,12 @@ fi
 (
   for i in $(seq 1 30); do
     if [ -d /sys/class/net/wlan0 ]; then
+      MAC=$(cat /sys/class/net/wlan0/address 2>/dev/null || true)
+      if [ -z "$MAC" ] || [ "$MAC" = "00:00:00:00:00:00" ]; then
+        NEW_MAC="e0:75:7d:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
+        ip link set dev wlan0 down 2>/dev/null || true
+        ip link set dev wlan0 address "$NEW_MAC" 2>/dev/null || true
+      fi
       ip link set wlan0 up 2>/dev/null || true
       echo "WiFi wlan0 detectado e pronto para conexao!"
       if [ -s /etc/wpa_supplicant/wpa_supplicant.conf ]; then

@@ -92,6 +92,7 @@ jobs:
 
           # 1. Unpack official Alpine ARMv7 Minirootfs
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/armv7/alpine-minirootfs-3.20.10-armv7.tar.gz | tar -xz -C irm
+          chmod -R u+rwX irm
 
           # 2. Extract static apk-tools, WiFi, disk tools and remote access packages
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/apk-tools-static-2.14.4-r1.apk | tar -xz -C irm
@@ -104,10 +105,11 @@ jobs:
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/pcsc-lite-libs-2.2.3-r0.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-1.47.0-r5.apk | tar -xz -C irm
           curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.20/main/armv7/e2fsprogs-libs-1.47.0-r5.apk | tar -xz -C irm
+          chmod -R u+rwX irm
 
           # Unify shared libraries and create helper symlinks
           cp -aP irm/usr/lib/* irm/lib/ 2>/dev/null || true
-          chmod +x irm/sbin/apk* irm/usr/sbin/dropbear* irm/usr/sbin/wpa* irm/usr/sbin/iw 2>/dev/null || true
+          chmod +x irm/sbin/apk irm/sbin/apk.static irm/usr/sbin/dropbear* irm/usr/sbin/wpa* irm/usr/sbin/iw 2>/dev/null || true
           ln -sf /sbin/apk irm/bin/apk
           ln -sf /sbin/apk.static irm/bin/apk.static
           ln -sf /usr/sbin/iw irm/bin/iw
@@ -126,7 +128,9 @@ jobs:
           cp -r firmware/* irm/lib/firmware/wlan/prima/
 
           # 4. Generate Dropbear host keys
-          mkdir -p irm/etc/dropbear irm/var/log irm/var/run/wpa_supplicant irm/tmp irm/root
+          rm -f irm/var/run
+          mkdir -p irm/etc/dropbear irm/var/log irm/run/wpa_supplicant irm/tmp irm/root
+          ln -s ../run irm/var/run
           chmod 1777 irm/tmp
           dropbearkey -t ed25519 -f irm/etc/dropbear/dropbear_ed25519_host_key
           dropbearkey -t rsa -f irm/etc/dropbear/dropbear_rsa_host_key
