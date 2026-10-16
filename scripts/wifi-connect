@@ -60,7 +60,7 @@ killall -9 wpa_supplicant udhcpc 2>/dev/null || true
 rm -rf /var/run/wpa_supplicant/* 2>/dev/null || true
 sleep 1
 
-wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf -f /var/log/wpa_supplicant.log
+wpa_supplicant -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /var/log/wpa_supplicant.log 2>&1 &
 
 echo "[*] Waiting for WiFi association (up to 20s)..."
 CONNECTED=0
