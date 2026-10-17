@@ -60,7 +60,7 @@ killall -9 wpa_supplicant udhcpc 2>/dev/null || true
 rm -rf /var/run/wpa_supplicant/* 2>/dev/null || true
 sleep 1
 
-wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /var/log/wpa_supplicant.log 2>&1
+wpa_supplicant -d -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /var/log/wpa_supplicant.log 2>&1 &
 
 echo "[*] Waiting for WiFi association (up to 20s)..."
 CONNECTED=0
@@ -77,6 +77,8 @@ if [ "$CONNECTED" -eq 0 ]; then
   echo "[-] Failed to associate with AP."
   echo "[-] Current wpa_supplicant status:"
   wpa_cli -i wlan0 status 2>/dev/null || true
+  echo "[-] Last wpa_supplicant logs:"
+  tail -n 25 /var/log/wpa_supplicant.log 2>/dev/null || true
   exit 1
 fi
 
