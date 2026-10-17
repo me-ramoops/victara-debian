@@ -175,7 +175,7 @@ jobs:
       - name: Pack fastboot boot images
         run: |
           set -euxo pipefail
-          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 consoleblank=0 lk2nd.pass-simplefb=xrgb8888,autorefresh,relocate clk_ignore_unused pd_ignore_unused msm.allow_vram_carveout=1 rootwait rw'
+          CMDLINE='console=ttyHSL0,115200,n8 console=tty0 consoleblank=0 lk2nd.pass-simplefb=xrgb8888,autorefresh,relocate clk_ignore_unused pd_ignore_unused msm.allow_vram_carveout=1 msm.vram=64m cma=128m rootwait rw'
           # 1. boot-noids.img (appended DTB without msm-id, standard fastboot boot)
           python3 - initramfs.cpio out/zImage-dtb-noids out/boot-noids.img "$CMDLINE" <<'PY'
           import struct, hashlib, sys
