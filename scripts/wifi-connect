@@ -46,9 +46,12 @@ network={
     ssid="$SSID"
     psk="$PASS"
     scan_ssid=1
+    ieee80211w=1
 }
 CONF
 fi
+
+iw reg set BR 2>/dev/null || true
 
 chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
 
